@@ -1,0 +1,17 @@
+* text=auto
+
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+*.ts text eol=LF
+*.vue text eol=LF
+
+*.js text eol=lf
+*.cjs text eol=LF
+*.mjs text eol=LF
+
+*.md text eol=lf
+*.txt text eol=LF
+*.yml text eol=LF
+*.yaml text eol=LF
+*.json text eol=LF
