@@ -8,15 +8,12 @@
         "importHelpers": true,
         "skipLibCheck": true,
         "esModuleInterop": true,
-        "allowSyntheticDefaultImports": true,
-        "removeComments": true,
-        "sourceMap": true,
         "noImplicitAny": true,
         "noImplicitReturns": true,
         "resolveJsonModule": true,
-        "declaration": true,
-        "emitDeclarationOnly": true,
-        "isolatedModules": true,
+        // "declaration": true,
+        // "emitDeclarationOnly": true,
+        // "isolatedModules": true,
         "baseUrl": "src",
         "paths": {
             "@/*": ["*"]

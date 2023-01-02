@@ -1,0 +1,44 @@
+{
+    "name": "@lorekeepers-of-bellithriel/cna-incantation",
+    "description": "Create Node App Incantation: Node.js + Typescript + Babel + esbuild + pkg",
+    "type": "module",
+    "private": true,
+    "packageManager": "yarn@3.3.1",
+    "main": "dist/main.js",
+    "bin": {
+        "build": "main.js build",
+        "dev": "main.js dev",
+        "setup": "main.js setup"
+    },
+    "scripts": {
+        "compile": "rollup -c -w",
+        "type-check": "tsc -w",
+        "old_cmp": "concurrently 'yarn compile' 'yarn type-check'",
+        "cmp": "tsc -w",
+        "dev": "nodemon --inspect",
+        "test": "npx ."
+    },
+    "devDependencies": {
+        "@types/node": "^18.11.18",
+        "nodemon": "^2.0.20"
+    },
+    "dependencies": {
+        "@babel/cli": "^7.20.7",
+        "@babel/core": "^7.20.7",
+        "@babel/preset-env": "^7.20.2",
+        "@lorekeepers-of-bellithriel/scribe": "^0.11.2-alpha",
+        "@rollup/plugin-babel": "^6.0.3",
+        "@rollup/plugin-commonjs": "^24.0.0",
+        "@rollup/plugin-json": "^6.0.0",
+        "@rollup/plugin-node-resolve": "^15.0.1",
+        "@rollup/plugin-typescript": "^10.0.1",
+        "@sindresorhus/is": "^5.3.0",
+        "babel-plugin-add-import-extension": "^1.6.0",
+        "babel-plugin-module-resolver": "^4.1.0",
+        "concurrently": "^7.6.0",
+        "esbuild": "^0.16.12",
+        "rollup": "^3.9.0",
+        "type-fest": "^3.5.0",
+        "typescript": "^4.9.4"
+    }
+}

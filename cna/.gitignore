@@ -142,3 +142,7 @@ dist
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+#! Custom
+
+dev_cache
