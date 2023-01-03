@@ -11,12 +11,8 @@
         "setup": "main.js setup"
     },
     "scripts": {
-        "compile": "rollup -c -w",
-        "type-check": "tsc -w",
-        "old_cmp": "concurrently 'yarn compile' 'yarn type-check'",
         "cmp": "tsc -w",
-        "dev": "nodemon --inspect",
-        "test": "npx ."
+        "dev": "nodemon --inspect"
     },
     "devDependencies": {
         "@types/node": "^18.11.18",

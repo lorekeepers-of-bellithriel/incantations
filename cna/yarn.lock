@@ -1494,9 +1494,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@lorekeepers-of-bellithriel/node-app@workspace:.":
+"@lorekeepers-of-bellithriel/cna-incantation@workspace:.":
   version: 0.0.0-use.local
-  resolution: "@lorekeepers-of-bellithriel/node-app@workspace:."
+  resolution: "@lorekeepers-of-bellithriel/cna-incantation@workspace:."
   dependencies:
     "@babel/cli": ^7.20.7
     "@babel/core": ^7.20.7
