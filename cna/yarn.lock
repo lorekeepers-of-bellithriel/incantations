@@ -1508,11 +1508,13 @@ __metadata:
     "@rollup/plugin-node-resolve": ^15.0.1
     "@rollup/plugin-typescript": ^10.0.1
     "@sindresorhus/is": ^5.3.0
+    "@types/lodash.merge": ^4.6.7
     "@types/node": ^18.11.18
     babel-plugin-add-import-extension: ^1.6.0
     babel-plugin-module-resolver: ^4.1.0
     concurrently: ^7.6.0
     esbuild: ^0.16.12
+    lodash.merge: ^4.6.2
     nodemon: ^2.0.20
     rollup: ^3.9.0
     type-fest: ^3.5.0
@@ -1686,6 +1688,22 @@ __metadata:
   version: 1.0.0
   resolution: "@types/estree@npm:1.0.0"
   checksum: 910d97fb7092c6738d30a7430ae4786a38542023c6302b95d46f49420b797f21619cdde11fa92b338366268795884111c2eb10356e4bd2c8ad5b92941e9e6443
+  languageName: node
+  linkType: hard
+
+"@types/lodash.merge@npm:^4.6.7":
+  version: 4.6.7
+  resolution: "@types/lodash.merge@npm:4.6.7"
+  dependencies:
+    "@types/lodash": "*"
+  checksum: 94cd6fb8e606756a28f45d63c658aacfbce11a151f7fa322c4a3e87aa50d8bf26e0ae8cba0250070a7c5a6792fc51f79abf4c648bbb1850692be386cd76cd0ca
+  languageName: node
+  linkType: hard
+
+"@types/lodash@npm:*":
+  version: 4.14.191
+  resolution: "@types/lodash@npm:4.14.191"
+  checksum: ba0d5434e10690869f32d5ea49095250157cae502f10d57de0a723fd72229ce6c6a4979576f0f13e0aa9fbe3ce2457bfb9fa7d4ec3d6daba56730a51906d1491
   languageName: node
   linkType: hard
 
@@ -2745,6 +2763,13 @@ __metadata:
   version: 4.0.8
   resolution: "lodash.debounce@npm:4.0.8"
   checksum: a3f527d22c548f43ae31c861ada88b2637eb48ac6aa3eb56e82d44917971b8aa96fbb37aa60efea674dc4ee8c42074f90f7b1f772e9db375435f6c83a19b3bc6
+  languageName: node
+  linkType: hard
+
+"lodash.merge@npm:^4.6.2":
+  version: 4.6.2
+  resolution: "lodash.merge@npm:4.6.2"
+  checksum: ad580b4bdbb7ca1f7abf7e1bce63a9a0b98e370cf40194b03380a46b4ed799c9573029599caebc1b14e3f24b111aef72b96674a56cfa105e0f5ac70546cdc005
   languageName: node
   linkType: hard
 
