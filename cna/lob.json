@@ -1,0 +1,8 @@
+{
+    "incantations": {
+        "cna": {
+            "source": "dev_cache/main.ts",
+            "dist": "dev_cache"
+        }
+    }
+}

@@ -29,8 +29,8 @@ const defaultLobConfiguration = (): LobConfiguration => {
     return {
         incantations: {
             cna: {
-                rootDir: ".",
-                kappa: "keepo",
+                source: ".",
+                dist: ".",
             },
         },
     };
@@ -67,25 +67,23 @@ const isRawIncantations = (value: unknown): value is RawIncantations => {
 };
 
 type CnaIncantation = {
-    rootDir: string;
-    // todo: remove
-    kappa: "keepo";
+    source: string;
+    dist: string;
 };
 type RawCnaIncantation = RequireAtLeastOne<CnaIncantation>;
 const isRawCnaIncantation = (value: unknown): value is RawCnaIncantation => {
     const val = value as RawCnaIncantation;
     if (!is.nonEmptyObject(val)) return false;
     let count = 0;
-    if (!is.undefined(val.rootDir)) {
-        if (!is.string(val.rootDir)) return false;
+    if (!is.undefined(val.source)) {
+        if (!is.string(val.source)) return false;
+        count++;
+    }
+    if (!is.undefined(val.dist)) {
+        if (!is.string(val.dist)) return false;
         count++;
     }
     return count !== 0;
-};
-
-const mergeRawLobConfiguration = (raw: RawLobConfiguration): LobConfiguration => {
-    const def: LobConfiguration = defaultLobConfiguration();
-    return lodashMerge(def, raw);
 };
 
 const fileExists = async (file: string): Promise<boolean> => {
@@ -93,8 +91,6 @@ const fileExists = async (file: string): Promise<boolean> => {
         await fs.stat(file);
         return true;
     } catch (err) {
-        // todo: remove error
-        scribe.error(err);
         return false;
     }
 };
@@ -153,16 +149,20 @@ const isAction = (value: unknown): value is Action => {
 const MAIN_DIR_NAME = ".lob";
 const INFO_FILE_NAME = "info.yaml";
 
+type ActionFunction = (config: LobConfiguration) => void;
+
 const determineAction = (args: string[]): Action | null => {
     for (const arg of args) if (isAction(arg)) return arg;
+    scribe.error("null action");
     return null;
 };
 
 const scribe = new Scribe({ level: LogLevels.All });
 
-const setup = async () => {
+const setup: ActionFunction = async (config) => {
     // todo: remove
     scribe.info("setup");
+    const prefix = "setup:";
     // creating the main directory that will host
     // all the necessary files during development
     const name = path.join(MAIN_DIR_NAME, INFO_FILE_NAME);
@@ -179,18 +179,24 @@ const setup = async () => {
     // todo: force type module in package.json
 };
 
-const dev = async () => {
-    // todo: implement
+const dev: ActionFunction = async (config) => {
+    // todo: remove
     scribe.info("dev");
+    const prefix = "dev:";
 };
 
-const build = async () => {
-    // todo: implement
+const build: ActionFunction = async (config) => {
+    // todo: remove
     scribe.info("build");
+    const prefix = "build:";
+    const source = path.resolve(config.incantations.cna.source);
+    const dist = path.resolve(config.incantations.cna.dist);
+    // todo: remove
+    scribe.inspect("source", source);
     try {
         const res = await esbuild.build({
-            entryPoints: ["dev_cache/main.ts"],
-            outfile: "dev_cache/main.js",
+            entryPoints: [source],
+            outdir: dist,
         });
         scribe.inspect("res", res);
     } catch (err) {
@@ -201,10 +207,12 @@ const build = async () => {
 };
 
 (async () => {
+    const config = await determineConfiguration(process.argv);
+    if (is.null_(config)) return;
     const action = determineAction(process.argv);
-    if (is.null_(action)) scribe.error("null action");
-    else if (action === "setup") setup();
-    else if (action === "dev") dev();
-    else if (action === "build") build();
+    if (is.null_(action)) return;
+    else if (action === "setup") setup(config);
+    else if (action === "dev") dev(config);
+    else if (action === "build") build(config);
     else scribe.error(`unhandled action: ${action}`);
 })();
