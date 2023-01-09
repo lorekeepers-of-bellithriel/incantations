@@ -5,9 +5,21 @@ import is from "@sindresorhus/is";
 import fs from "node:fs/promises";
 import esbuild from "esbuild";
 import path from "node:path";
+import {
+    parse as JsoncParse,
+    ParseError as JsoncParseError,
+    printParseErrorCode as getJsoncErrorCode,
+    //
+} from "jsonc-parser";
+import originalGlob from "glob";
+import { promisify } from "util";
+
+const glob = promisify(originalGlob);
 
 // todo: move these types/enums/consts/functions into a separate package that's used by all cli-like apps
 //#region temp config types
+
+//#region lib
 const LOB_CONFIG_FILE_ARG_NAME = "--config=";
 
 enum StandardConfigurationFiles {
@@ -17,6 +29,12 @@ enum StandardConfigurationFiles {
 export const isStandardConfigurationFiles = (value: unknown): value is StandardConfigurationFiles => {
     return Object.values(StandardConfigurationFiles).includes(value as StandardConfigurationFiles);
 };
+
+type NonEmptyStringArray = [string, ...string[]];
+export const isNonEmptyStringArray = (value: unknown): value is NonEmptyStringArray => {
+    return is.array(value, is.string) && value.length > 0;
+};
+//#endregion
 
 type StandardConfigurationFile = { standard: StandardConfigurationFiles };
 type CustomConfigurationFile = { custom: string };
@@ -29,6 +47,7 @@ const defaultLobConfiguration = (): LobConfiguration => {
     return {
         incantations: {
             cna: {
+                root: ".",
                 source: ".",
                 dist: ".",
             },
@@ -66,8 +85,13 @@ const isRawIncantations = (value: unknown): value is RawIncantations => {
     return count !== 0;
 };
 
+type CnaIncantationSource = string | NonEmptyStringArray;
+export const isCnaIncantationSource = (value: unknown): value is CnaIncantationSource => {
+    return is.string(value) || isNonEmptyStringArray(value);
+};
 type CnaIncantation = {
-    source: string;
+    root: string;
+    source: CnaIncantationSource;
     dist: string;
 };
 type RawCnaIncantation = RequireAtLeastOne<CnaIncantation>;
@@ -75,8 +99,12 @@ const isRawCnaIncantation = (value: unknown): value is RawCnaIncantation => {
     const val = value as RawCnaIncantation;
     if (!is.nonEmptyObject(val)) return false;
     let count = 0;
+    if (!is.undefined(val.root)) {
+        if (!is.string(val.root)) return false;
+        count++;
+    }
     if (!is.undefined(val.source)) {
-        if (!is.string(val.source)) return false;
+        if (!isCnaIncantationSource(val.source)) return false;
         count++;
     }
     if (!is.undefined(val.dist)) {
@@ -114,20 +142,42 @@ const determineConfiguration = async (args: string[]): Promise<LobConfiguration 
         scribe.error(prefix, "programmatic configuration file is not supported yet, try using a json configuration file instead");
         return null;
     } else if (file.endsWith(".json")) {
-        let raw: unknown;
+        let config: unknown;
         try {
             const buf = await fs.readFile(file);
-            raw = JSON.parse(buf.toString());
+            const errors: JsoncParseError[] = [];
+            const raw = buf.toString();
+            config = JsoncParse(raw, errors, {
+                allowTrailingComma: true,
+            });
+            if (errors.length !== 0) {
+                for (const e of errors) {
+                    const code = getJsoncErrorCode(e.error);
+                    let line = 1;
+                    let column = 1;
+                    for (let i = 0; i < raw.length; i++) {
+                        if (i === e.offset) break;
+                        if (raw[i] === "\n") {
+                            line++;
+                            column = 1;
+                        } else {
+                            column++;
+                        }
+                    }
+                    scribe.error(prefix, `${code} at line ${line} and column ${column}`);
+                }
+                return null;
+            }
         } catch (err) {
             scribe.error(prefix, err);
             return null;
         }
-        if (!isRawLobConfiguration(raw)) {
+        if (!isRawLobConfiguration(config)) {
             scribe.error(prefix, "incorrect json configuration file structure in", file);
             return null;
         }
         const def = defaultLobConfiguration();
-        return lodashMerge(def, raw);
+        return lodashMerge(def, config);
     } else {
         scribe.error(prefix, "unknown configuration file extension in", file);
         return null;
@@ -189,15 +239,50 @@ const build: ActionFunction = async (config) => {
     // todo: remove
     scribe.info("build");
     const prefix = "build:";
-    const source = path.resolve(config.incantations.cna.source);
-    const dist = path.resolve(config.incantations.cna.dist);
+    const root = config.incantations.cna.root;
+    const source = config.incantations.cna.source;
+    const dist = config.incantations.cna.dist;
+    let entryPoints: NonEmptyStringArray;
+    const resolveGlobPattern = async (source: string): Promise<NonEmptyStringArray | null> => {
+        const pattern = `${root}/${source}`;
+        if (source.includes("*")) {
+            const matches = await glob(pattern);
+            if (!isNonEmptyStringArray(matches)) {
+                scribe.error(prefix, `no files match the pattern '${pattern}'`);
+                return null;
+            }
+            return matches;
+        } else {
+            return [pattern];
+        }
+    };
+    if (is.string(source)) {
+        const files = await resolveGlobPattern(source);
+        if (is.null_(files)) return;
+        entryPoints = files;
+    } else {
+        let i = 0;
+        const files = await resolveGlobPattern(source[i]);
+        if (is.null_(files)) return;
+        entryPoints = files;
+        while (++i < source.length) {
+            const files = await resolveGlobPattern(source[i]);
+            if (is.null_(files)) return;
+            entryPoints.push(...files);
+        }
+        // remove duplicates
+        entryPoints = [...new Set(entryPoints)] as NonEmptyStringArray;
+    }
+    const outdir = path.join(root, dist);
     // todo: remove
-    scribe.inspect("source", source);
+    scribe.inspect("entry points", entryPoints);
     try {
         const res = await esbuild.build({
-            entryPoints: [source],
-            outdir: dist,
+            entryPoints: entryPoints,
+            outdir: outdir,
+            // bundle: true,
         });
+        // todo: remove
         scribe.inspect("res", res);
     } catch (err) {
         scribe.error("build error", err);
