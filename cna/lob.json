@@ -2,8 +2,7 @@
     "incantations": {
         "cna": {
             "root": "dev_cache",
-            // test
-            "source": ["src/*/*.ts"],
+            "source": "src/main.ts",
             "dist": "dist"
         }
     }

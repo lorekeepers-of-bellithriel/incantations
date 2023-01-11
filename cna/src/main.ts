@@ -1,9 +1,9 @@
 import { Scribe, LogLevels } from "@lorekeepers-of-bellithriel/scribe";
-import { MergeExclusive, RequireAtLeastOne } from "type-fest";
+import { MergeExclusive, PartialDeep, TsConfigJson } from "type-fest";
 import lodashMerge from "lodash.merge";
 import is from "@sindresorhus/is";
 import fs from "node:fs/promises";
-import esbuild from "esbuild";
+import esb from "esbuild";
 import path from "node:path";
 import {
     parse as JsoncParse,
@@ -13,10 +13,15 @@ import {
 } from "jsonc-parser";
 import originalGlob from "glob";
 import { promisify } from "util";
+import { exec, spawn } from "node:child_process";
 
 const glob = promisify(originalGlob);
 
-// todo: move these types/enums/consts/functions into a separate package that's used by all cli-like apps
+const jsonStringify = (json: Record<string, unknown>): string => {
+    return JSON.stringify(json, undefined, 4);
+};
+
+// todo: move these types/enums/consts/functions into a separate package that's used by all lob cli-like apps (like incantations)
 //#region temp config types
 
 //#region lib
@@ -48,41 +53,29 @@ const defaultLobConfiguration = (): LobConfiguration => {
         incantations: {
             cna: {
                 root: ".",
-                source: ".",
+                source: "main.ts",
                 dist: ".",
             },
         },
     };
 };
-type RawLobConfiguration = RequireAtLeastOne<{
-    incantations: RawIncantations;
-}>;
+type RawLobConfiguration = PartialDeep<LobConfiguration>;
 const isRawLobConfiguration = (value: unknown): value is RawLobConfiguration => {
     const val = value as RawLobConfiguration;
-    if (!is.nonEmptyObject(val)) return false;
-    let count = 0;
-    if (!is.undefined(val.incantations)) {
-        if (!isRawIncantations(val.incantations)) return false;
-        count++;
-    }
-    return count !== 0;
+    if (!is.plainObject(val)) return false;
+    else if (!is.any([is.undefined, isRawIncantations], val.incantations)) return false;
+    else return true;
 };
 
 type Incantations = {
     cna: CnaIncantation;
 };
-type RawIncantations = RequireAtLeastOne<{
-    cna: RawCnaIncantation;
-}>;
+type RawIncantations = PartialDeep<Incantations>;
 const isRawIncantations = (value: unknown): value is RawIncantations => {
     const val = value as RawIncantations;
-    if (!is.nonEmptyObject(val)) return false;
-    let count = 0;
-    if (!is.undefined(val.cna)) {
-        if (!isRawCnaIncantation(val.cna)) return false;
-        count++;
-    }
-    return count !== 0;
+    if (!is.plainObject(val)) return false;
+    else if (!is.any([is.undefined, isRawCnaIncantation], val.cna)) return false;
+    else return true;
 };
 
 type CnaIncantationSource = string | NonEmptyStringArray;
@@ -94,24 +87,14 @@ type CnaIncantation = {
     source: CnaIncantationSource;
     dist: string;
 };
-type RawCnaIncantation = RequireAtLeastOne<CnaIncantation>;
+type RawCnaIncantation = PartialDeep<CnaIncantation>;
 const isRawCnaIncantation = (value: unknown): value is RawCnaIncantation => {
     const val = value as RawCnaIncantation;
-    if (!is.nonEmptyObject(val)) return false;
-    let count = 0;
-    if (!is.undefined(val.root)) {
-        if (!is.string(val.root)) return false;
-        count++;
-    }
-    if (!is.undefined(val.source)) {
-        if (!isCnaIncantationSource(val.source)) return false;
-        count++;
-    }
-    if (!is.undefined(val.dist)) {
-        if (!is.string(val.dist)) return false;
-        count++;
-    }
-    return count !== 0;
+    if (!is.plainObject(val)) return false;
+    else if (!is.any([is.undefined, is.string], val.root)) return false;
+    else if (!is.any([is.undefined, isCnaIncantationSource], val.source)) return false;
+    else if (!is.any([is.undefined, is.string], val.dist)) return false;
+    else return true;
 };
 
 const fileExists = async (file: string): Promise<boolean> => {
@@ -199,6 +182,42 @@ const isAction = (value: unknown): value is Action => {
 const MAIN_DIR_NAME = ".lob";
 const INFO_FILE_NAME = "info.yaml";
 
+const TS_CONFIG_JSON_FILE_NAME = "tsconfig.json";
+const MAIN_TS_CONFIG_JSON: TsConfigJson = {
+    compilerOptions: {
+        target: "ESNext",
+        module: "ESNext",
+        moduleResolution: "Node",
+        lib: ["ESNext"],
+        strict: true,
+        importHelpers: true,
+        skipLibCheck: true,
+        esModuleInterop: true,
+        noImplicitAny: true,
+        noImplicitReturns: true,
+        resolveJsonModule: true,
+        // todo: test and either enable later or remove completely
+        // allowJs: true,
+        // todo: enable this option when cna-incantation is used to develop itself
+        // noEmit: true,
+        declaration: true,
+        emitDeclarationOnly: true,
+        declarationMap: true,
+        isolatedModules: true,
+        types: ["node"],
+        baseUrl: "..",
+        paths: {
+            "@/*": ["*"],
+        },
+    },
+    compileOnSave: true,
+    include: ["../**/*"],
+    exclude: ["../dist"],
+};
+const SUB_TS_CONFIG_JSON: TsConfigJson = {
+    extends: `./${MAIN_DIR_NAME}/${TS_CONFIG_JSON_FILE_NAME}`,
+};
+
 type ActionFunction = (config: LobConfiguration) => void;
 
 const determineAction = (args: string[]): Action | null => {
@@ -215,14 +234,20 @@ const setup: ActionFunction = async (config) => {
     const prefix = "setup:";
     // creating the main directory that will host
     // all the necessary files during development
-    const name = path.join(MAIN_DIR_NAME, INFO_FILE_NAME);
+    const infoFile = path.join(MAIN_DIR_NAME, INFO_FILE_NAME);
     // todo: when package json name/version/description/other injection is implemented
     // todo: and cna-incantation is used to create itself, add the name and version
     // todo: to the data below \/_\/_\/
-    const data = `name: \nversion: \n`;
+    const infoFileData = `name: \nversion: \n`;
+    const mainTsConfigJsonFile = path.join(MAIN_DIR_NAME, TS_CONFIG_JSON_FILE_NAME);
+    const mainTsConfigJsonData = jsonStringify(MAIN_TS_CONFIG_JSON);
+    const subTsConfigJsonFile = TS_CONFIG_JSON_FILE_NAME;
+    const subTsConfigJsonData = jsonStringify(SUB_TS_CONFIG_JSON);
     try {
         await fs.mkdir(MAIN_DIR_NAME, { recursive: true });
-        await fs.writeFile(name, data);
+        await fs.writeFile(infoFile, infoFileData);
+        await fs.writeFile(mainTsConfigJsonFile, mainTsConfigJsonData);
+        await fs.writeFile(subTsConfigJsonFile, subTsConfigJsonData);
     } catch (err) {
         scribe.error("error during setup", err);
     }
@@ -277,13 +302,26 @@ const build: ActionFunction = async (config) => {
     // todo: remove
     scribe.inspect("entry points", entryPoints);
     try {
-        const res = await esbuild.build({
+        const esbRes = await esb.build({
             entryPoints: entryPoints,
             outdir: outdir,
-            // bundle: true,
+            bundle: true,
+            minify: true,
+            treeShaking: true,
+            sourcemap: "external",
+            outExtension: { ".js": ".cjs" },
+            // watch: true,
         });
         // todo: remove
-        scribe.inspect("res", res);
+        scribe.inspect("res", esbRes);
+        //
+        const kappa = exec(`tsc --outFile ${outdir}/main.d.ts`);
+        kappa.on("spawn", () => scribe.info("spawn"));
+        kappa.on("message", (message, sendHandle) => scribe.inspect("message", { message, sendHandle }));
+        kappa.on("error", (err) => scribe.error("error", err));
+        kappa.on("disconnect", () => scribe.info("disconnect"));
+        kappa.on("close", (code, signal) => scribe.inspect("close", { code, signal }));
+        kappa.on("exit", (code, signal) => scribe.inspect("exit", { code, signal }));
     } catch (err) {
         scribe.error("build error", err);
     } finally {

@@ -11,7 +11,7 @@
         "setup": "main.js setup"
     },
     "scripts": {
-        "cmp": "tsc -w",
+        "cmp": "tsc -w -p temp-tsconfig.json",
         "dev": "nodemon --inspect"
     },
     "devDependencies": {
