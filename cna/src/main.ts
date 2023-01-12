@@ -1,5 +1,5 @@
 import { Scribe, LogLevels } from "@lorekeepers-of-bellithriel/scribe";
-import { MergeExclusive, PartialDeep, TsConfigJson } from "type-fest";
+import { Except, MergeExclusive, PartialDeep, TsConfigJson, ValueOf } from "type-fest";
 import lodashMerge from "lodash.merge";
 import is from "@sindresorhus/is";
 import fs from "node:fs/promises";
@@ -13,7 +13,8 @@ import {
 } from "jsonc-parser";
 import originalGlob from "glob";
 import { promisify } from "util";
-import { exec, spawn } from "node:child_process";
+// import ts from "typescript";
+import { createProject, ts } from "@ts-morph/bootstrap";
 
 const glob = promisify(originalGlob);
 
@@ -210,13 +211,36 @@ const MAIN_TS_CONFIG_JSON: TsConfigJson = {
             "@/*": ["*"],
         },
     },
-    compileOnSave: true,
     include: ["../**/*"],
     exclude: ["../dist"],
 };
 const SUB_TS_CONFIG_JSON: TsConfigJson = {
     extends: `./${MAIN_DIR_NAME}/${TS_CONFIG_JSON_FILE_NAME}`,
 };
+
+// todo: remove
+// const MAIN_TS_COMPILER_OPTIONS: ts.CompilerOptions = {
+//     target: ts.ScriptTarget.ESNext,
+//     module: ts.ModuleKind.ESNext,
+//     moduleResolution: ts.ModuleResolutionKind.NodeJs,
+//     lib: ["ESNext"],
+//     strict: true,
+//     importHelpers: true,
+//     skipLibCheck: true,
+//     esModuleInterop: true,
+//     noImplicitAny: true,
+//     noImplicitReturns: true,
+//     resolveJsonModule: true,
+//     declaration: true,
+//     emitDeclarationOnly: true,
+//     isolatedModules: true,
+//     declarationMap: true,
+//     types: ["node"],
+//     baseUrl: "..",
+//     paths: {
+//         "@/*": ["*"],
+//     },
+// };
 
 type ActionFunction = (config: LobConfiguration) => void;
 
@@ -314,14 +338,8 @@ const build: ActionFunction = async (config) => {
         });
         // todo: remove
         scribe.inspect("res", esbRes);
-        //
-        const kappa = exec(`tsc --outFile ${outdir}/main.d.ts`);
-        kappa.on("spawn", () => scribe.info("spawn"));
-        kappa.on("message", (message, sendHandle) => scribe.inspect("message", { message, sendHandle }));
-        kappa.on("error", (err) => scribe.error("error", err));
-        kappa.on("disconnect", () => scribe.info("disconnect"));
-        kappa.on("close", (code, signal) => scribe.inspect("close", { code, signal }));
-        kappa.on("exit", (code, signal) => scribe.inspect("exit", { code, signal }));
+        // todo: create types
+        compile();
     } catch (err) {
         scribe.error("build error", err);
     } finally {
@@ -339,3 +357,23 @@ const build: ActionFunction = async (config) => {
     else if (action === "build") build(config);
     else scribe.error(`unhandled action: ${action}`);
 })();
+
+// todo: remove
+const compile = async () => {
+    const project = await createProject();
+};
+// const kappaCompile = (fileNames: string[], options: ts.CompilerOptions): void => {
+//     // Create a Program with an in-memory emit
+//     const createdFiles: Record<string, any> = {};
+//     const host = ts.createCompilerHost({});
+//     host.writeFile = (fileName: string, contents: string) => (createdFiles[fileName] = contents);
+//     // Prepare and emit the d.ts files
+//     const program = ts.createProgram(fileNames, options, host);
+//     program.emit();
+//     // Loop through all the input files
+//     fileNames.forEach((file) => {
+//         scribe.info("file", file);
+//         const dts = file.replace(".js", ".d.ts");
+//         scribe.info("dts", createdFiles[dts]);
+//     });
+// };

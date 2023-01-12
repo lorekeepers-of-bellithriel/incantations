@@ -21,9 +21,5 @@
         "outDir": "dist"
     },
     "compileOnSave": true,
-    "include": [
-        // source
-        "src/**/*.ts",
-        "src/**/*.d.ts"
-    ]
+    "include": ["src/main.ts"]
 }
