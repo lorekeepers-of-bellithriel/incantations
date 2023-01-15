@@ -13,8 +13,7 @@ import {
 } from "jsonc-parser";
 import originalGlob from "glob";
 import { promisify } from "util";
-// import ts from "typescript";
-import { createProject, ts } from "@ts-morph/bootstrap";
+import tsMorph from "ts-morph";
 
 const glob = promisify(originalGlob);
 
@@ -292,32 +291,12 @@ const build: ActionFunction = async (config) => {
     const source = config.incantations.cna.source;
     const dist = config.incantations.cna.dist;
     let entryPoints: NonEmptyStringArray;
-    const resolveGlobPattern = async (source: string): Promise<NonEmptyStringArray | null> => {
-        const pattern = `${root}/${source}`;
-        if (source.includes("*")) {
-            const matches = await glob(pattern);
-            if (!isNonEmptyStringArray(matches)) {
-                scribe.error(prefix, `no files match the pattern '${pattern}'`);
-                return null;
-            }
-            return matches;
-        } else {
-            return [pattern];
-        }
-    };
     if (is.string(source)) {
-        const files = await resolveGlobPattern(source);
-        if (is.null_(files)) return;
-        entryPoints = files;
+        entryPoints = [path.join(root, source)];
     } else {
-        let i = 0;
-        const files = await resolveGlobPattern(source[i]);
-        if (is.null_(files)) return;
-        entryPoints = files;
-        while (++i < source.length) {
-            const files = await resolveGlobPattern(source[i]);
-            if (is.null_(files)) return;
-            entryPoints.push(...files);
+        entryPoints = ["", ""];
+        for (const file of source) {
+            entryPoints.push(path.join(root, file));
         }
         // remove duplicates
         entryPoints = [...new Set(entryPoints)] as NonEmptyStringArray;
@@ -326,6 +305,7 @@ const build: ActionFunction = async (config) => {
     // todo: remove
     scribe.inspect("entry points", entryPoints);
     try {
+        // todo: restore when typescript is implemented
         const esbRes = await esb.build({
             entryPoints: entryPoints,
             outdir: outdir,
@@ -339,7 +319,7 @@ const build: ActionFunction = async (config) => {
         // todo: remove
         scribe.inspect("res", esbRes);
         // todo: create types
-        compile();
+        for (const entryPoint of entryPoints) compile(entryPoint, outdir);
     } catch (err) {
         scribe.error("build error", err);
     } finally {
@@ -359,21 +339,28 @@ const build: ActionFunction = async (config) => {
 })();
 
 // todo: remove
-const compile = async () => {
-    const project = await createProject();
+const compile = async (entryPoint: string, dist: string) => {
+    const file = path.parse(entryPoint).name;
+    const outFile = path.join(dist, file);
+    const project = new tsMorph.Project({
+        tsConfigFilePath: TS_CONFIG_JSON_FILE_NAME,
+        compilerOptions: { outFile, allowJs: true },
+    });
+    const sourceFilesFromTsConfig = project.getSourceFiles();
+    sourceFilesFromTsConfig.forEach((s) => project.removeSourceFile(s));
+    // project.addSourceFileAtPath(entryPoint);
+    project.addSourceFileAtPath(`${outFile}.cjs`);
+    // todo: remove
+    const skata = project.getSourceFiles();
+    // todo: remove
+    for (const s of skata)
+        scribe.inspect("s", {
+            getBaseName: s.getBaseName(),
+            getKindName: s.getKindName(),
+            getBaseNameWithoutExtension: s.getBaseNameWithoutExtension(),
+            getFilePath: s.getFilePath(),
+        });
+    const results = await project.emit();
+    // todo: figure out how to log results (either using results or by enabling an option in project)
+    // scribe.inspect("results", results.getDiagnostics());
 };
-// const kappaCompile = (fileNames: string[], options: ts.CompilerOptions): void => {
-//     // Create a Program with an in-memory emit
-//     const createdFiles: Record<string, any> = {};
-//     const host = ts.createCompilerHost({});
-//     host.writeFile = (fileName: string, contents: string) => (createdFiles[fileName] = contents);
-//     // Prepare and emit the d.ts files
-//     const program = ts.createProgram(fileNames, options, host);
-//     program.emit();
-//     // Loop through all the input files
-//     fileNames.forEach((file) => {
-//         scribe.info("file", file);
-//         const dts = file.replace(".js", ".d.ts");
-//         scribe.info("dts", createdFiles[dts]);
-//     });
-// };

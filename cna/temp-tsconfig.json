@@ -21,5 +21,9 @@
         "outDir": "dist"
     },
     "compileOnSave": true,
-    "include": ["src/main.ts"]
+    "include": [
+        "src/main.ts",
+        // todo: remove
+        "src/test.ts"
+    ]
 }
