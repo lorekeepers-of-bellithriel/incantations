@@ -1,5 +1,5 @@
 import { Scribe, LogLevels } from "@lorekeepers-of-bellithriel/scribe";
-import { Except, MergeExclusive, PartialDeep, TsConfigJson, ValueOf } from "type-fest";
+import { Except, MergeExclusive, PackageJson, PartialDeep, TsConfigJson, ValueOf } from "type-fest";
 import lodashMerge from "lodash.merge";
 import is from "@sindresorhus/is";
 import fs from "node:fs/promises";
@@ -55,6 +55,8 @@ const defaultLobConfiguration = (): LobConfiguration => {
                 root: ".",
                 source: "main.ts",
                 dist: ".",
+                container: false,
+                bin: false,
             },
         },
     };
@@ -86,6 +88,8 @@ type CnaIncantation = {
     root: string;
     source: CnaIncantationSource;
     dist: string;
+    container: boolean;
+    bin: boolean;
 };
 type RawCnaIncantation = PartialDeep<CnaIncantation>;
 const isRawCnaIncantation = (value: unknown): value is RawCnaIncantation => {
@@ -94,6 +98,8 @@ const isRawCnaIncantation = (value: unknown): value is RawCnaIncantation => {
     else if (!is.any([is.undefined, is.string], val.root)) return false;
     else if (!is.any([is.undefined, isCnaIncantationSource], val.source)) return false;
     else if (!is.any([is.undefined, is.string], val.dist)) return false;
+    else if (!is.any([is.undefined, is.boolean], val.container)) return false;
+    else if (!is.any([is.undefined, is.boolean], val.bin)) return false;
     else return true;
 };
 
@@ -180,10 +186,13 @@ const isAction = (value: unknown): value is Action => {
 };
 
 const MAIN_DIR_NAME = ".lob";
+const CACHE_DIR_NAME = "cache";
+const ESM_DIR_NAME = "esm";
+const CJS_DIR_NAME = "cjs";
 const INFO_FILE_NAME = "info.yaml";
 
 const TS_CONFIG_JSON_FILE_NAME = "tsconfig.json";
-const MAIN_TS_CONFIG_JSON: TsConfigJson = {
+const mainTsConfigJson = (): TsConfigJson => ({
     compilerOptions: {
         target: "ESNext",
         module: "ESNext",
@@ -212,36 +221,66 @@ const MAIN_TS_CONFIG_JSON: TsConfigJson = {
     },
     include: ["../**/*"],
     exclude: ["../dist"],
-};
-const SUB_TS_CONFIG_JSON: TsConfigJson = {
+});
+const subTsConfigJson = (): TsConfigJson => ({
     extends: `./${MAIN_DIR_NAME}/${TS_CONFIG_JSON_FILE_NAME}`,
+});
+
+const DOCKERFILE_FILE_NAME = "dockerfile";
+const mainDockerfileFile = (name: string): string => `FROM node
+
+# app lives here
+WORKDIR /${name}
+
+# project dependencies
+COPY ./.yarn/releases ./.yarn/releases
+COPY ./package.json ./
+COPY ./.yarnrc.yml ./
+COPY ./yarn.lock ./
+
+# project (compiled) source
+COPY ./${MAIN_DIR_NAME}/${CACHE_DIR_NAME}/${ESM_DIR_NAME} ./kernel/js
+
+# install dependencies
+RUN corepack enable
+RUN yarn plugin import workspace-tools
+RUN yarn workspaces focus --production
+
+# run the app
+ENTRYPOINT ["node", "kernel/js/main.js"]
+`;
+
+type UsefulPackageJsonInfo = {
+    name: string;
+    version: string;
 };
-
-// todo: remove
-// const MAIN_TS_COMPILER_OPTIONS: ts.CompilerOptions = {
-//     target: ts.ScriptTarget.ESNext,
-//     module: ts.ModuleKind.ESNext,
-//     moduleResolution: ts.ModuleResolutionKind.NodeJs,
-//     lib: ["ESNext"],
-//     strict: true,
-//     importHelpers: true,
-//     skipLibCheck: true,
-//     esModuleInterop: true,
-//     noImplicitAny: true,
-//     noImplicitReturns: true,
-//     resolveJsonModule: true,
-//     declaration: true,
-//     emitDeclarationOnly: true,
-//     isolatedModules: true,
-//     declarationMap: true,
-//     types: ["node"],
-//     baseUrl: "..",
-//     paths: {
-//         "@/*": ["*"],
-//     },
-// };
-
-type ActionFunction = (config: LobConfiguration) => void;
+const readUsefulPackageJsonInfo = async (): Promise<UsefulPackageJsonInfo | null> => {
+    const prefix = "read useful package json info:";
+    let packageJson: Record<string, unknown>;
+    try {
+        const raw = await fs.readFile("package.json");
+        const parsed = JSON.parse(raw.toString());
+        if (!is.nonEmptyObject(parsed)) {
+            scribe.error(prefix, "package json is not a non-empty object");
+            return null;
+        }
+        packageJson = parsed;
+    } catch (err) {
+        scribe.error(prefix, err);
+        return null;
+    }
+    const name = packageJson.name;
+    if (!is.string(name)) {
+        scribe.error(prefix, `name is not a string (${name})`);
+        return null;
+    }
+    const version = packageJson.version;
+    if (!is.string(version)) {
+        scribe.error(prefix, `version is not a string (${version})`);
+        return null;
+    }
+    return { name, version };
+};
 
 const determineAction = (args: string[]): Action | null => {
     for (const arg of args) if (isAction(arg)) return arg;
@@ -249,9 +288,11 @@ const determineAction = (args: string[]): Action | null => {
     return null;
 };
 
+type ActionFunction = (config: LobConfiguration, usefulPackageJsonInfo: UsefulPackageJsonInfo) => void;
+
 const scribe = new Scribe({ level: LogLevels.All });
 
-const setup: ActionFunction = async (config) => {
+const setup: ActionFunction = async (config, usefulPackageJsonInfo) => {
     // todo: remove
     scribe.info("setup");
     const prefix = "setup:";
@@ -263,14 +304,17 @@ const setup: ActionFunction = async (config) => {
     // todo: to the data below \/_\/_\/
     const infoFileData = `name: \nversion: \n`;
     const mainTsConfigJsonFile = path.join(MAIN_DIR_NAME, TS_CONFIG_JSON_FILE_NAME);
-    const mainTsConfigJsonData = jsonStringify(MAIN_TS_CONFIG_JSON);
+    const mainTsConfigJsonData = jsonStringify(mainTsConfigJson());
     const subTsConfigJsonFile = TS_CONFIG_JSON_FILE_NAME;
-    const subTsConfigJsonData = jsonStringify(SUB_TS_CONFIG_JSON);
+    const subTsConfigJsonData = jsonStringify(subTsConfigJson());
+    const mainDockerfile = path.join(MAIN_DIR_NAME, DOCKERFILE_FILE_NAME);
+    const mainDockerfileData = mainDockerfileFile(usefulPackageJsonInfo.name);
     try {
         await fs.mkdir(MAIN_DIR_NAME, { recursive: true });
         await fs.writeFile(infoFile, infoFileData);
         await fs.writeFile(mainTsConfigJsonFile, mainTsConfigJsonData);
         await fs.writeFile(subTsConfigJsonFile, subTsConfigJsonData);
+        await fs.writeFile(mainDockerfile, mainDockerfileData);
     } catch (err) {
         scribe.error("error during setup", err);
     }
@@ -304,18 +348,19 @@ const build: ActionFunction = async (config) => {
     const outdir = path.join(root, dist);
     // todo: remove
     scribe.inspect("entry points", entryPoints);
+    const options: esb.BuildOptions = {
+        entryPoints: entryPoints,
+        outdir: outdir,
+        bundle: true,
+        minify: true,
+        color: true,
+        treeShaking: true,
+        sourcemap: "external",
+        outExtension: { ".js": ".cjs" },
+    };
     try {
         // todo: restore when typescript is implemented
-        const esbRes = await esb.build({
-            entryPoints: entryPoints,
-            outdir: outdir,
-            bundle: true,
-            minify: true,
-            treeShaking: true,
-            sourcemap: "external",
-            outExtension: { ".js": ".cjs" },
-            // watch: true,
-        });
+        const esbRes = await esb.build(options);
         // todo: remove
         scribe.inspect("res", esbRes);
         // todo: create types
@@ -328,13 +373,15 @@ const build: ActionFunction = async (config) => {
 };
 
 (async () => {
+    const usefulPackageJsonInfo = await readUsefulPackageJsonInfo();
+    if (is.null_(usefulPackageJsonInfo)) return;
     const config = await determineConfiguration(process.argv);
     if (is.null_(config)) return;
     const action = determineAction(process.argv);
     if (is.null_(action)) return;
-    else if (action === "setup") setup(config);
-    else if (action === "dev") dev(config);
-    else if (action === "build") build(config);
+    else if (action === "setup") setup(config, usefulPackageJsonInfo);
+    else if (action === "dev") dev(config, usefulPackageJsonInfo);
+    else if (action === "build") build(config, usefulPackageJsonInfo);
     else scribe.error(`unhandled action: ${action}`);
 })();
 

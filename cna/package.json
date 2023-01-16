@@ -1,5 +1,6 @@
 {
     "name": "@lorekeepers-of-bellithriel/cna-incantation",
+    "version": "0.0.1-alpha",
     "description": "Create Node App Incantation: Node.js + Typescript + Babel + esbuild + pkg",
     "type": "module",
     "private": true,
@@ -34,7 +35,7 @@
         "babel-plugin-add-import-extension": "^1.6.0",
         "babel-plugin-module-resolver": "^4.1.0",
         "concurrently": "^7.6.0",
-        "esbuild": "^0.16.12",
+        "esbuild": "^0.17.1",
         "glob": "^8.0.3",
         "jsonc-parser": "^3.2.0",
         "lodash.merge": "^4.6.2",
