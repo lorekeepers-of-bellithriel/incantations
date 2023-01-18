@@ -1,6 +1,6 @@
 import { LogLevels, Scribe } from "@lorekeepers-of-bellithriel/scribe";
-import skata from "../dev_cache/dist/main.cjs";
+import skata from "main";
 
 const scribe = new Scribe({ level: LogLevels.All });
 
-scribe.inspect("kappa", skata.kappa);
+scribe.inspect("kappa", skata.skata);
