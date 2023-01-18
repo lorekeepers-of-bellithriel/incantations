@@ -367,8 +367,8 @@ const build: ActionFunction = async (config) => {
         // todo: remove
         scribe.inspect("res", esbRes);
         // todo: create types
-        for (const entryPoint of entryPoints) compile(entryPoint, outdir);
-        // compile(entryPoints, outdir);
+        // for (const entryPoint of entryPoints) compile(entryPoint, outdir);
+        compile(entryPoints, outdir);
     } catch (err) {
         scribe.error("build error", err);
     } finally {
@@ -390,70 +390,77 @@ const build: ActionFunction = async (config) => {
 })();
 
 // todo: remove
-const compile = async (entryPoint: string, dist: string) => {
-    const file = path.parse(entryPoint).name;
-    const outFile = path.join(dist, file);
-    const project = new tsMorph.Project({
-        tsConfigFilePath: TS_CONFIG_JSON_FILE_NAME,
-        compilerOptions: { outFile, allowJs: true },
-    });
-    const sourceFilesFromTsConfig = project.getSourceFiles();
-    sourceFilesFromTsConfig.forEach((s) => project.removeSourceFile(s));
-    project.addSourceFileAtPath(entryPoint);
+// const compile = async (entryPoint: string, dist: string) => {
+//     const file = path.parse(entryPoint).name;
+//     const outFile = path.join(dist, file);
+//     const project = new tsMorph.Project({
+//         tsConfigFilePath: TS_CONFIG_JSON_FILE_NAME,
+//         compilerOptions: { outFile, allowJs: true },
+//     });
+//     const sourceFilesFromTsConfig = project.getSourceFiles();
+//     sourceFilesFromTsConfig.forEach((s) => project.removeSourceFile(s));
+//     project.addSourceFileAtPath(entryPoint);
+//     // todo: remove
+//     const skata = project.getSourceFiles();
+//     // todo: remove
+//     for (const s of skata)
+//         scribe.inspect("s", {
+//             getBaseName: s.getBaseName(),
+//             getKindName: s.getKindName(),
+//             getBaseNameWithoutExtension: s.getBaseNameWithoutExtension(),
+//             getFilePath: s.getFilePath(),
+//         });
+//     const results = await project.emit();
+//     // todo: figure out how to log results (either using results or by enabling an option in project)
+//     // scribe.inspect("results", results.getDiagnostics());
+// };
+function compile(entryPoints: NonEmptyStringArray, dist: string): void {
     // todo: remove
-    const skata = project.getSourceFiles();
+    scribe.inspect("entryPoints", entryPoints);
+    const options: ts.CompilerOptions = {
+        // target: ts.ScriptTarget.ESNext,
+        // module: ts.ModuleKind.ESNext,
+        // moduleResolution: ts.ModuleResolutionKind.NodeJs,
+        // lib: ["ESNext"],
+        // strict: true,
+        // importHelpers: true,
+        // skipLibCheck: true,
+        // esModuleInterop: true,
+        // noImplicitAny: true,
+        // noImplicitReturns: true,
+        // resolveJsonModule: true,
+        // declaration: true,
+        // emitDeclarationOnly: true,
+        // declarationMap: true,
+        // isolatedModules: true,
+        // allowJs: true,
+        // types: ["node"],
+        // baseUrl: ".",
+        // paths: {
+        //     "@/*": ["*"],
+        // },
+        allowJs: true,
+        declaration: true,
+        emitDeclarationOnly: true,
+        declarationMap: true,
+    };
+    const fileNames: string[] = [];
+    for (const entryPoint of entryPoints) {
+        const fileName = path.parse(entryPoint).name;
+        fileNames.push(`${path.join(dist, fileName)}.js`);
+    }
     // todo: remove
-    for (const s of skata)
-        scribe.inspect("s", {
-            getBaseName: s.getBaseName(),
-            getKindName: s.getKindName(),
-            getBaseNameWithoutExtension: s.getBaseNameWithoutExtension(),
-            getFilePath: s.getFilePath(),
-        });
-    const results = await project.emit();
-    // todo: figure out how to log results (either using results or by enabling an option in project)
-    // scribe.inspect("results", results.getDiagnostics());
-};
-// function compile(entryPoints: NonEmptyStringArray, dist: string): void {
-//     // todo: remove
-//     scribe.inspect("entryPoints", entryPoints);
-//     const options: ts.CompilerOptions = {
-//         target: ts.ScriptTarget.ESNext,
-//         module: ts.ModuleKind.ESNext,
-//         moduleResolution: ts.ModuleResolutionKind.NodeJs,
-//         lib: ["ESNext"],
-//         // strict: true,
-//         // importHelpers: true,
-//         // skipLibCheck: true,
-//         // esModuleInterop: true,
-//         // noImplicitAny: true,
-//         // noImplicitReturns: true,
-//         // resolveJsonModule: true,
-//         // declaration: true,
-//         // emitDeclarationOnly: true,
-//         // declarationMap: true,
-//         // isolatedModules: true,
-//         allowJs: true,
-//         types: ["node"],
-//         baseUrl: ".",
-//         paths: {
-//             "@/*": ["*"],
-//         },
-//     };
-//     const fileNames: string[] = [];
-//     for (const entryPoint of entryPoints) {
-//         const fileName = path.parse(entryPoint).name;
-//         fileNames.push(`${path.join(dist, fileName)}.js`);
-//     }
-//     // todo: remove
-//     scribe.inspect("fileNames", fileNames);
-//     // Create a Program with an in-memory emit
-//     // todo: figure out how to create program that emits files on disk instead of in-memory
-//     const host = ts.createCompilerHost(options);
-//     // todo: remove
-//     host.writeFile = (file, data) => scribe.inspect(file, data);
-//     // Prepare and emit the d.ts files
-//     const program = ts.createProgram(fileNames, options, host);
-//     // const program = ts.createProgram(entryPoints, options, host);
-//     program.emit();
-// }
+    scribe.inspect("fileNames", fileNames);
+    // Create a Program with an in-memory emit
+    // todo: figure out how to create program that emits files on disk instead of in-memory
+    const host = ts.createCompilerHost(options);
+    // todo: remove
+    host.writeFile = (file, data) => {
+        scribe.inspect(file, data);
+        fs.writeFile(file, data);
+    };
+    // Prepare and emit the d.ts files
+    const program = ts.createProgram(fileNames, options, host);
+    // const program = ts.createProgram(entryPoints, options, host);
+    program.emit();
+}
