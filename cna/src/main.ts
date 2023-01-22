@@ -11,12 +11,12 @@ import {
     printParseErrorCode as getJsoncErrorCode,
     //
 } from "jsonc-parser";
-import originalGlob from "glob";
+import glob from "glob";
 import { promisify } from "util";
 import tsMorph from "ts-morph";
 import ts from "typescript";
 
-const glob = promisify(originalGlob);
+const listFiles = promisify(glob);
 
 const jsonStringify = (json: Record<string, unknown>): string => {
     return JSON.stringify(json, undefined, 4);
@@ -192,6 +192,8 @@ const ESM_DIR_NAME = "esm";
 const CJS_DIR_NAME = "cjs";
 const INFO_FILE_NAME = "info.yaml";
 
+const TYPESCRIPT_DIAGNOSTICS_CUSTOM_NEW_LINE_TOKEN = "\n\t";
+
 const TS_CONFIG_JSON_FILE_NAME = "tsconfig.json";
 const mainTsConfigJson = (): TsConfigJson => ({
     compilerOptions: {
@@ -206,13 +208,6 @@ const mainTsConfigJson = (): TsConfigJson => ({
         noImplicitAny: true,
         noImplicitReturns: true,
         resolveJsonModule: true,
-        // todo: test and either enable later or remove completely
-        // allowJs: true,
-        // todo: enable this option when cna-incantation is used to develop itself
-        // noEmit: true,
-        declaration: true,
-        emitDeclarationOnly: true,
-        declarationMap: true,
         isolatedModules: true,
         types: ["node"],
         baseUrl: "..",
@@ -360,19 +355,98 @@ const build: ActionFunction = async (config) => {
         sourcemap: "external",
         format: "esm",
         // outExtension: { ".js": ".cjs" },
+        // external: [...Object.keys(packageJson.dependencies || {}), ...Object.keys(packageJson.devDependencies || {})],
     };
     try {
-        // todo: restore when typescript is implemented
+        const tsc = tsCommons();
+        if (is.null_(tsc)) return;
+        tsTypeCheck(entryPoints, tsc);
         const esbRes = await esb.build(options);
         // todo: remove
         scribe.inspect("res", esbRes);
-        // todo: create types
-        // for (const entryPoint of entryPoints) compile(entryPoint, outdir);
-        compile(entryPoints, outdir);
+        tsCompile(entryPoints, outdir, tsc);
     } catch (err) {
         scribe.error("build error", err);
     } finally {
         scribe.info("noice!");
+    }
+};
+
+type TsCommons = {
+    compilerOptions: ts.CompilerOptions;
+};
+/**
+ * Common features and data used by typescript related methods.
+ */
+const tsCommons = (): TsCommons | null => {
+    // read the tsconfig.json file
+    const rawJsonConfig = ts.readConfigFile(TS_CONFIG_JSON_FILE_NAME, ts.sys.readFile);
+    if (rawJsonConfig.error) {
+        scribe.error("couldn't read typescript configuration file:", rawJsonConfig.error.messageText);
+        scribe.inspect("raw error object", rawJsonConfig.error);
+        return null;
+    }
+    // parse the tsconfig.json file
+    const parsedJsonConfig = ts.parseJsonConfigFileContent(rawJsonConfig.config, ts.sys, process.cwd());
+    if (parsedJsonConfig.errors.length) {
+        scribe.error("couldn't parse typescript configuration file:");
+        parsedJsonConfig.errors.forEach((e) => {
+            scribe.error("-", e.messageText);
+            scribe.inspect("raw error object", e);
+        });
+        return null;
+    }
+    // assemble all the typescript common pieces
+    return { compilerOptions: parsedJsonConfig.options };
+};
+const tsCompile = (entryPoints: NonEmptyStringArray, dist: string, tsc: TsCommons) => {
+    const options: ts.CompilerOptions = {
+        // w/e the user configured typescript with
+        ...tsc.compilerOptions,
+        // the minimal options needed for typescript to create .d.ts files
+        // we cannot and should not force the user to put these options in
+        // the tsconfig.json file, they sometimes affect the code editor
+        allowJs: true,
+        declaration: true,
+        declarationMap: true,
+        emitDeclarationOnly: true,
+    };
+    const fileNames: string[] = [];
+    for (const entryPoint of entryPoints) {
+        const fileName = path.parse(entryPoint).name;
+        fileNames.push(`${path.join(dist, fileName)}.js`);
+    }
+    // todo: remove
+    scribe.inspect("fileNames", fileNames);
+    const host = ts.createCompilerHost(options);
+    host.writeFile = (file, data) => fs.writeFile(file, data);
+    const program = ts.createProgram(fileNames, options, host);
+    program.emit();
+};
+const tsTypeCheck = (entryPoints: NonEmptyStringArray, tsc: TsCommons) => {
+    const options: ts.CompilerOptions = {
+        // w/e the user configured typescript with
+        ...tsc.compilerOptions,
+        // the minimal options needed for typescript to type check .ts files
+        // we cannot and should not force the user to put these options in
+        // the tsconfig.json file, they sometimes affect the code editor
+        noEmit: true,
+    };
+    const host = ts.createCompilerHost(options);
+    const program = ts.createProgram(entryPoints, options, host);
+    const emitResult = program.emit();
+    const diagnostics = ts.getPreEmitDiagnostics(program).concat(emitResult.diagnostics);
+    if (diagnostics.length) {
+        const formattedDiagnostics = ts
+            .formatDiagnosticsWithColorAndContext(diagnostics, {
+                getCurrentDirectory: () => process.cwd(),
+                getNewLine: () => TYPESCRIPT_DIAGNOSTICS_CUSTOM_NEW_LINE_TOKEN,
+                getCanonicalFileName: (fileName) => fileName,
+            })
+            .trim();
+        const prefix = `Found ${diagnostics.length} error${diagnostics.length === 1 ? "" : "s"}:`;
+        const errorMessage = `\n${TYPESCRIPT_DIAGNOSTICS_CUSTOM_NEW_LINE_TOKEN}${formattedDiagnostics}\n`;
+        scribe.error(prefix, errorMessage);
     }
 };
 
@@ -388,79 +462,3 @@ const build: ActionFunction = async (config) => {
     else if (action === "build") build(config, usefulPackageJsonInfo);
     else scribe.error(`unhandled action: ${action}`);
 })();
-
-// todo: remove
-// const compile = async (entryPoint: string, dist: string) => {
-//     const file = path.parse(entryPoint).name;
-//     const outFile = path.join(dist, file);
-//     const project = new tsMorph.Project({
-//         tsConfigFilePath: TS_CONFIG_JSON_FILE_NAME,
-//         compilerOptions: { outFile, allowJs: true },
-//     });
-//     const sourceFilesFromTsConfig = project.getSourceFiles();
-//     sourceFilesFromTsConfig.forEach((s) => project.removeSourceFile(s));
-//     project.addSourceFileAtPath(entryPoint);
-//     // todo: remove
-//     const skata = project.getSourceFiles();
-//     // todo: remove
-//     for (const s of skata)
-//         scribe.inspect("s", {
-//             getBaseName: s.getBaseName(),
-//             getKindName: s.getKindName(),
-//             getBaseNameWithoutExtension: s.getBaseNameWithoutExtension(),
-//             getFilePath: s.getFilePath(),
-//         });
-//     const results = await project.emit();
-//     // todo: figure out how to log results (either using results or by enabling an option in project)
-//     // scribe.inspect("results", results.getDiagnostics());
-// };
-function compile(entryPoints: NonEmptyStringArray, dist: string): void {
-    // todo: remove
-    scribe.inspect("entryPoints", entryPoints);
-    const options: ts.CompilerOptions = {
-        // target: ts.ScriptTarget.ESNext,
-        // module: ts.ModuleKind.ESNext,
-        // moduleResolution: ts.ModuleResolutionKind.NodeJs,
-        // lib: ["ESNext"],
-        // strict: true,
-        // importHelpers: true,
-        // skipLibCheck: true,
-        // esModuleInterop: true,
-        // noImplicitAny: true,
-        // noImplicitReturns: true,
-        // resolveJsonModule: true,
-        // declaration: true,
-        // emitDeclarationOnly: true,
-        // declarationMap: true,
-        // isolatedModules: true,
-        // allowJs: true,
-        // types: ["node"],
-        // baseUrl: ".",
-        // paths: {
-        //     "@/*": ["*"],
-        // },
-        allowJs: true,
-        declaration: true,
-        emitDeclarationOnly: true,
-        declarationMap: true,
-    };
-    const fileNames: string[] = [];
-    for (const entryPoint of entryPoints) {
-        const fileName = path.parse(entryPoint).name;
-        fileNames.push(`${path.join(dist, fileName)}.js`);
-    }
-    // todo: remove
-    scribe.inspect("fileNames", fileNames);
-    // Create a Program with an in-memory emit
-    // todo: figure out how to create program that emits files on disk instead of in-memory
-    const host = ts.createCompilerHost(options);
-    // todo: remove
-    host.writeFile = (file, data) => {
-        scribe.inspect(file, data);
-        fs.writeFile(file, data);
-    };
-    // Prepare and emit the d.ts files
-    const program = ts.createProgram(fileNames, options, host);
-    // const program = ts.createProgram(entryPoints, options, host);
-    program.emit();
-}

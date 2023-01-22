@@ -1,6 +1,6 @@
 {
     "name": "@lorekeepers-of-bellithriel/cna-incantation",
-    "version": "0.0.1-alpha",
+    "version": "0.0.2-alpha",
     "description": "Create Node App Incantation: Node.js + Typescript + Babel + esbuild + pkg",
     "type": "module",
     "private": true,
@@ -13,7 +13,7 @@
     },
     "scripts": {
         "cmp": "tsc -w -p temp-tsconfig.json",
-        "dev": "nodemon --inspect"
+        "dev": "nodemon --inspect --watch dist dist/main.js"
     },
     "devDependencies": {
         "@types/glob": "^8.0.0",

@@ -1,5 +1,0 @@
-{
-    "watch": "dist",
-    "ext": "js,cjs,mjs,json,yaml,yml,env",
-    "exec": "node ."
-}
