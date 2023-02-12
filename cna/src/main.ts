@@ -212,6 +212,7 @@ const mainTsConfigJson = (): TsConfigJson => ({
         types: ["node"],
         baseUrl: "..",
         paths: {
+            // todo: add more conventions here, like `components` etc
             "@/*": ["*"],
         },
     },
