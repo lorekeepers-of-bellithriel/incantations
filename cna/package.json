@@ -1,6 +1,6 @@
 {
     "name": "@lorekeepers-of-bellithriel/cna-incantation",
-    "version": "0.0.2-alpha",
+    "version": "0.0.3-alpha",
     "description": "Create Node App Incantation: Node.js + Typescript + Babel + esbuild + pkg",
     "type": "module",
     "private": true,

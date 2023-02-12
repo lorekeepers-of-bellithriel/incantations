@@ -1,20 +1,19 @@
 import { Scribe, LogLevels } from "@lorekeepers-of-bellithriel/scribe";
-import { Except, MergeExclusive, PackageJson, PartialDeep, TsConfigJson, ValueOf } from "type-fest";
+import { MergeExclusive, PartialDeep, TsConfigJson } from "type-fest";
 import lodashMerge from "lodash.merge";
 import is from "@sindresorhus/is";
 import fs from "node:fs/promises";
-import esb from "esbuild";
+import { promisify } from "util";
 import path from "node:path";
+import ts from "typescript";
+import esb from "esbuild";
+import glob from "glob";
 import {
-    parse as JsoncParse,
-    ParseError as JsoncParseError,
     printParseErrorCode as getJsoncErrorCode,
+    ParseError as JsoncParseError,
+    parse as JsoncParse,
     //
 } from "jsonc-parser";
-import glob from "glob";
-import { promisify } from "util";
-import tsMorph from "ts-morph";
-import ts from "typescript";
 
 const listFiles = promisify(glob);
 
@@ -113,21 +112,15 @@ const fileExists = async (file: string): Promise<boolean> => {
     }
 };
 
-const determineConfigurationFile = async (args: string[]): Promise<ConfigurationFile | null> => {
-    const arg = args.find((arg) => arg.startsWith(LOB_CONFIG_FILE_ARG_NAME));
-    if (!is.undefined(arg)) return { custom: arg.replace(LOB_CONFIG_FILE_ARG_NAME, "") };
-    for (const standardConfigFile of Object.values(StandardConfigurationFiles)) {
-        if (await fileExists(standardConfigFile)) return { standard: standardConfigFile };
-    }
-    return null;
-};
-
-const determineConfiguration = async (args: string[]): Promise<LobConfiguration | null> => {
-    const configFile = await determineConfigurationFile(args);
+const determineConfiguration = async (options: Options): Promise<LobConfiguration | null> => {
     // no config file available, use default configuration
-    if (is.null_(configFile)) return defaultLobConfiguration();
+    if (is.null_(options.configFile)) return defaultLobConfiguration();
     const prefix = "could not determine configuration";
-    const file = path.resolve(configFile.custom === undefined ? configFile.standard : configFile.custom);
+    const file = path.resolve(
+        options.configFile.custom === undefined
+            ? options.configFile.standard //
+            : options.configFile.custom
+    );
     if (file.endsWith(".js")) {
         scribe.error(prefix, "programmatic configuration file is not supported yet, try using a json configuration file instead");
         return null;
@@ -184,6 +177,23 @@ const ACTIONS = [
 type Action = typeof ACTIONS[number];
 const isAction = (value: unknown): value is Action => {
     return ACTIONS.includes(value as Action);
+};
+
+const DEBUG_MODES = ["db", "debug-mode", "debugMode"];
+const isDebugMode = (value: unknown): boolean => {
+    for (const debugMode of DEBUG_MODES) {
+        if (value === debugMode) return true;
+        else if (value === debugMode.toLowerCase()) return true;
+        else if (value === debugMode.toUpperCase()) return true;
+        else continue;
+    }
+    return false;
+};
+
+type Options = {
+    action: Action;
+    debugMode: boolean;
+    configFile: ConfigurationFile | null;
 };
 
 const MAIN_DIR_NAME = ".lob";
@@ -279,15 +289,40 @@ const readUsefulPackageJsonInfo = async (): Promise<UsefulPackageJsonInfo | null
     return { name, version };
 };
 
-const determineAction = (args: string[]): Action | null => {
-    for (const arg of args) if (isAction(arg)) return arg;
-    scribe.error("null action");
-    return null;
+const determineOptions = async (args: string[]): Promise<Options | null> => {
+    let debugMode: boolean = false;
+    let action: Action | null = null;
+    let configFile: ConfigurationFile | null = null;
+    for (const arg of args) {
+        if (isDebugMode(arg)) debugMode = true;
+        else if (isAction(arg)) action = arg;
+        else if (arg.startsWith(LOB_CONFIG_FILE_ARG_NAME)) {
+            configFile = { custom: arg.replace(LOB_CONFIG_FILE_ARG_NAME, "") };
+        }
+    }
+    if (debugMode) scribe.configure({ level: LogLevels.All });
+    if (!action) {
+        scribe.error("null action");
+        return null;
+    }
+    if (!configFile) {
+        for (const standardConfigFile of Object.values(StandardConfigurationFiles)) {
+            if (await fileExists(standardConfigFile)) {
+                configFile = { standard: standardConfigFile };
+                break;
+            }
+        }
+    }
+    return { debugMode, action, configFile };
 };
 
-type ActionFunction = (config: LobConfiguration, usefulPackageJsonInfo: UsefulPackageJsonInfo) => void;
+type ActionFunction = (config: LobConfiguration, usefulPackageJsonInfo: UsefulPackageJsonInfo) => Promise<void>;
 
-const scribe = new Scribe({ level: LogLevels.All });
+type TsCommons = {
+    compilerOptions: ts.CompilerOptions;
+};
+
+const scribe = new Scribe({ level: LogLevels.None });
 
 const setup: ActionFunction = async (config, usefulPackageJsonInfo) => {
     // todo: remove
@@ -342,9 +377,17 @@ const build: ActionFunction = async (config) => {
         // remove duplicates
         entryPoints = [...new Set(entryPoints)] as NonEmptyStringArray;
     }
-    const outdir = path.join(root, dist);
+    const outDir = path.join(root, dist);
     // todo: remove
     scribe.inspect("entry points", entryPoints);
+    const tsc = tsCommons();
+    if (is.null_(tsc)) return;
+    await esBuild(entryPoints, outDir);
+    tsCompile(entryPoints, outDir, tsc);
+    tsTypeCheck(entryPoints, tsc);
+};
+
+const esBuild = async (entryPoints: NonEmptyStringArray, outdir: string) => {
     const options: esb.BuildOptions = {
         entryPoints: entryPoints,
         outdir: outdir,
@@ -359,23 +402,14 @@ const build: ActionFunction = async (config) => {
         // external: [...Object.keys(packageJson.dependencies || {}), ...Object.keys(packageJson.devDependencies || {})],
     };
     try {
-        const tsc = tsCommons();
-        if (is.null_(tsc)) return;
-        tsTypeCheck(entryPoints, tsc);
         const esbRes = await esb.build(options);
         // todo: remove
         scribe.inspect("res", esbRes);
-        tsCompile(entryPoints, outdir, tsc);
     } catch (err) {
         scribe.error("build error", err);
-    } finally {
-        scribe.info("noice!");
     }
 };
 
-type TsCommons = {
-    compilerOptions: ts.CompilerOptions;
-};
 /**
  * Common features and data used by typescript related methods.
  */
@@ -445,21 +479,25 @@ const tsTypeCheck = (entryPoints: NonEmptyStringArray, tsc: TsCommons) => {
                 getCanonicalFileName: (fileName) => fileName,
             })
             .trim();
-        const prefix = `Found ${diagnostics.length} error${diagnostics.length === 1 ? "" : "s"}:`;
-        const errorMessage = `\n${TYPESCRIPT_DIAGNOSTICS_CUSTOM_NEW_LINE_TOKEN}${formattedDiagnostics}\n`;
-        scribe.error(prefix, errorMessage);
+        const postfix = `Number of errors: ${diagnostics.length}`;
+        const errorMessage = `${TYPESCRIPT_DIAGNOSTICS_CUSTOM_NEW_LINE_TOKEN}${formattedDiagnostics}\n\n${postfix}\n`;
+        console.error(errorMessage);
     }
 };
 
+const handleAction = async (options: Options, lobConfig: LobConfiguration, usefulPackageJsonInfo: UsefulPackageJsonInfo) => {
+    if (options.action === "setup") await setup(lobConfig, usefulPackageJsonInfo);
+    else if (options.action === "dev") await dev(lobConfig, usefulPackageJsonInfo);
+    else if (options.action === "build") await build(lobConfig, usefulPackageJsonInfo);
+    else scribe.error(`unhandled action: ${options.action}`);
+};
+
 (async () => {
+    const options = await determineOptions(process.argv);
+    if (is.null_(options)) return;
+    const lobConfig = await determineConfiguration(options);
+    if (is.null_(lobConfig)) return;
     const usefulPackageJsonInfo = await readUsefulPackageJsonInfo();
     if (is.null_(usefulPackageJsonInfo)) return;
-    const config = await determineConfiguration(process.argv);
-    if (is.null_(config)) return;
-    const action = determineAction(process.argv);
-    if (is.null_(action)) return;
-    else if (action === "setup") setup(config, usefulPackageJsonInfo);
-    else if (action === "dev") dev(config, usefulPackageJsonInfo);
-    else if (action === "build") build(config, usefulPackageJsonInfo);
-    else scribe.error(`unhandled action: ${action}`);
+    await handleAction(options, lobConfig, usefulPackageJsonInfo);
 })();
