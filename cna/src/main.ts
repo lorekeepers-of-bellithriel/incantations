@@ -3,19 +3,15 @@ import { MergeExclusive, PartialDeep, TsConfigJson } from "type-fest";
 import lodashMerge from "lodash.merge";
 import is from "@sindresorhus/is";
 import fs from "node:fs/promises";
-import { promisify } from "util";
 import path from "node:path";
 import ts from "typescript";
 import esb from "esbuild";
-import glob from "glob";
 import {
     printParseErrorCode as getJsoncErrorCode,
     ParseError as JsoncParseError,
     parse as JsoncParse,
     //
 } from "jsonc-parser";
-
-const listFiles = promisify(glob);
 
 const jsonStringify = (json: Record<string, unknown>): string => {
     return JSON.stringify(json, undefined, 4);
@@ -31,12 +27,12 @@ enum StandardConfigurationFiles {
     Programmatic = "lob.config.js",
     Json = "lob.json",
 }
-export const isStandardConfigurationFiles = (value: unknown): value is StandardConfigurationFiles => {
+const isStandardConfigurationFiles = (value: unknown): value is StandardConfigurationFiles => {
     return Object.values(StandardConfigurationFiles).includes(value as StandardConfigurationFiles);
 };
 
 type NonEmptyStringArray = [string, ...string[]];
-export const isNonEmptyStringArray = (value: unknown): value is NonEmptyStringArray => {
+const isNonEmptyStringArray = (value: unknown): value is NonEmptyStringArray => {
     return is.array(value, is.string) && value.length > 0;
 };
 //#endregion
@@ -81,7 +77,7 @@ const isRawIncantations = (value: unknown): value is RawIncantations => {
 };
 
 type CnaIncantationSource = string | NonEmptyStringArray;
-export const isCnaIncantationSource = (value: unknown): value is CnaIncantationSource => {
+const isCnaIncantationSource = (value: unknown): value is CnaIncantationSource => {
     return is.string(value) || isNonEmptyStringArray(value);
 };
 type CnaIncantation = {
@@ -353,16 +349,7 @@ const setup: ActionFunction = async (config, usefulPackageJsonInfo) => {
     // todo: force type module in package.json
 };
 
-const dev: ActionFunction = async (config) => {
-    // todo: remove
-    scribe.info("dev");
-    const prefix = "dev:";
-};
-
-const build: ActionFunction = async (config) => {
-    // todo: remove
-    scribe.info("build");
-    const prefix = "build:";
+const preProcessing = (config: LobConfiguration) => {
     const root = config.incantations.cna.root;
     const source = config.incantations.cna.source;
     const dist = config.incantations.cna.dist;
@@ -380,6 +367,24 @@ const build: ActionFunction = async (config) => {
     const outDir = path.join(root, dist);
     // todo: remove
     scribe.inspect("entry points", entryPoints);
+    return { entryPoints, outDir };
+};
+const dev: ActionFunction = async (config) => {
+    // todo: remove
+    scribe.info("dev");
+    const prefix = "dev:";
+    const { entryPoints, outDir } = preProcessing(config);
+    const tsc = tsCommons();
+    if (is.null_(tsc)) return;
+    await esBuildWatch(entryPoints, outDir);
+    tsCompile(entryPoints, outDir, tsc);
+    tsTypeCheck(entryPoints, tsc);
+};
+const build: ActionFunction = async (config) => {
+    // todo: remove
+    scribe.info("build");
+    const prefix = "build:";
+    const { entryPoints, outDir } = preProcessing(config);
     const tsc = tsCommons();
     if (is.null_(tsc)) return;
     await esBuild(entryPoints, outDir);
@@ -387,10 +392,10 @@ const build: ActionFunction = async (config) => {
     tsTypeCheck(entryPoints, tsc);
 };
 
-const esBuild = async (entryPoints: NonEmptyStringArray, outdir: string) => {
-    const options: esb.BuildOptions = {
-        entryPoints: entryPoints,
-        outdir: outdir,
+const esBuildOptions = (entryPoints: NonEmptyStringArray, outdir: string): esb.BuildOptions => {
+    return {
+        entryPoints,
+        outdir,
         platform: "node",
         bundle: true,
         minify: true,
@@ -398,15 +403,27 @@ const esBuild = async (entryPoints: NonEmptyStringArray, outdir: string) => {
         treeShaking: true,
         sourcemap: "external",
         format: "esm",
-        // outExtension: { ".js": ".cjs" },
-        // external: [...Object.keys(packageJson.dependencies || {}), ...Object.keys(packageJson.devDependencies || {})],
     };
+};
+const esBuild = async (entryPoints: NonEmptyStringArray, outdir: string) => {
+    const options = esBuildOptions(entryPoints, outdir);
     try {
         const esbRes = await esb.build(options);
         // todo: remove
         scribe.inspect("res", esbRes);
     } catch (err) {
         scribe.error("build error", err);
+    }
+};
+const esBuildWatch = async (entryPoints: NonEmptyStringArray, outdir: string) => {
+    const options = esBuildOptions(entryPoints, outdir);
+    try {
+        const esbCtx = await esb.context(options);
+        esbCtx.watch();
+        // todo: remove
+        scribe.inspect("res", esbCtx);
+    } catch (err) {
+        scribe.error("build watch error", err);
     }
 };
 
@@ -434,7 +451,7 @@ const tsCommons = (): TsCommons | null => {
     // assemble all the typescript common pieces
     return { compilerOptions: parsedJsonConfig.options };
 };
-const tsCompile = (entryPoints: NonEmptyStringArray, dist: string, tsc: TsCommons) => {
+const tsCompilePreProcessing = (entryPoints: NonEmptyStringArray, dist: string, tsc: TsCommons) => {
     const options: ts.CompilerOptions = {
         // w/e the user configured typescript with
         ...tsc.compilerOptions,
@@ -453,10 +470,29 @@ const tsCompile = (entryPoints: NonEmptyStringArray, dist: string, tsc: TsCommon
     }
     // todo: remove
     scribe.inspect("fileNames", fileNames);
+    return { options, fileNames };
+};
+const tsCompile = (entryPoints: NonEmptyStringArray, dist: string, tsc: TsCommons) => {
+    const { options, fileNames } = tsCompilePreProcessing(entryPoints, dist, tsc);
     const host = ts.createCompilerHost(options);
     host.writeFile = (file, data) => fs.writeFile(file, data);
     const program = ts.createProgram(fileNames, options, host);
     program.emit();
+};
+const tsCompileWatch = (entryPoints: NonEmptyStringArray, dist: string, tsc: TsCommons) => {
+    const { options, fileNames } = tsCompilePreProcessing(entryPoints, dist, tsc);
+    const host = ts.createWatchCompilerHost(
+        fileNames,
+        options,
+        ts.sys,
+        ts.createSemanticDiagnosticsBuilderProgram,
+        undefined,
+        undefined
+        //
+    );
+    // todo: figure out how to write files in watch mode
+    // host.writeFile = (file, data) => fs.writeFile(file, data);
+    const program = ts.createWatchProgram(host);
 };
 const tsTypeCheck = (entryPoints: NonEmptyStringArray, tsc: TsCommons) => {
     const options: ts.CompilerOptions = {
